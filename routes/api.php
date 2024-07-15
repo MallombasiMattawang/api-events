@@ -89,6 +89,10 @@ Route::prefix('admin')->group(function () {
         //Event Members
         Route::apiResource('/event-members', App\Http\Controllers\Api\Admin\EventMemberController::class)
             ->middleware('permission:event_members.index|event_members.store|event_members.update|event_members.delete');
+
+        //events Member reReg
+        Route::get('/event-members_re_reg/{id}', [\App\Http\Controllers\Api\Admin\EventMemberController::class, 'reReg'])
+        ->middleware('permission:event_members.index');
     });
 });
 

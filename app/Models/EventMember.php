@@ -52,7 +52,7 @@ class EventMember extends Model
 
     public static function generatePaidNumber()
     {
-        $kode_book = 'P-';
+        $kode_book = 'OBU-';
         
         // Get the last kode_paid number
         $lastPaid = self::orderBy('kode_paid', 'desc')->first();
@@ -64,7 +64,8 @@ class EventMember extends Model
             $number = $lastNumber + 1;
         }
 
-        return $kode_book . str_pad($number, 5, '0', STR_PAD_LEFT);
+        // return $kode_book . str_pad($number, 5, '0', STR_PAD_LEFT);
+        return $kode_book . $number;
     }
 
     public function event()

@@ -4,11 +4,14 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\EventMemberResource;
+use App\Mail\Invoice;
 use App\Models\EventMember;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Mail;
+use App\Mail\PaymentConfirmation;
 
 
 class EventMemberController extends Controller
@@ -19,17 +22,36 @@ class EventMemberController extends Controller
      * @return \Illuminate\Http\Response
      */
     public function index()
-    {
-        $eventMembers = EventMember::with('event','eventJersey','eventCategory')->when(request()->search, function ($eventMembers) {
-            $eventMembers = $eventMembers->where('first_name', 'like', '%' . request()->search . '%');
-        })->latest()->paginate(25);
+{
+    $eventMembers = EventMember::with('event', 'eventJersey', 'eventCategory')
+        ->when(request()->search, function ($query) {
+            $search = request()->search;
+            $query->where(function ($query) use ($search) {
+                $query->where('first_name', 'like', '%' . $search . '%')
+                      ->orWhere('last_name', 'like', '%' . $search . '%')
+                      ->orWhere('email', 'like', '%' . $search . '%')
+                      ->orWhere('no_whatsapp', 'like', '%' . $search . '%')
+                      ->orWhere('name_bib', 'like', '%' . $search . '%')
+                      ->orWhere('status', 'like', '%' . $search . '%')
+                      ->orWhere('created_at', 'like', '%' . $search . '%')
+                      ->orWhereHas('event', function ($query) use ($search) {
+                          $query->where('title', 'like', '%' . $search . '%');
+                      })
+                      ->orWhereHas('eventCategory', function ($query) use ($search) {
+                          $query->where('name', 'like', '%' . $search . '%');
+                      });
+            });
+        })
+        ->latest()
+        ->paginate(25);
 
-        //append query string to pagination links
-        $eventMembers->appends(['search' => request()->search]);
+    // Append query string to pagination links
+    $eventMembers->appends(['search' => request()->search]);
 
-        //return with Api Resource
-        return new EventMemberResource(true, 'List Data Events Member', $eventMembers);
-    }
+    // Return with Api Resource
+    return new EventMemberResource(true, 'List Data Events Member', $eventMembers);
+}
+
 
     /**
      * Store a newly created resource in storage.
@@ -42,12 +64,12 @@ class EventMemberController extends Controller
         $validator = Validator::make(
             $request->all(),
             [
-                'payment_receipt'         => 'required|image|mimes:jpeg,jpg,png|max:5000',
+                // 'payment_receipt'         => 'required|image|mimes:jpeg,jpg,png|max:5000',
                 'event_id'           => 'required',
                 'first_name'           => 'required',
                 'last_name'           => 'required',
-                'community'           => 'required',
-                'name_bib'          => 'required',
+                // 'community'           => 'required',
+                // 'name_bib'          => 'required',
                 'email' => 'required|email|unique:event_members,email',
                 'no_whatsapp'           => 'required',
                 'event_jersey_id'           => 'required',
@@ -65,8 +87,13 @@ class EventMemberController extends Controller
         }
 
         //upload image
+        $name_image = null;
         $image = $request->file('payment_receipt');
-        $image->storeAs('public/payment_receipt', $image->hashName());
+        if ($image) {
+            $image->storeAs('public/payment_receipt', $image->hashName());
+            $name_image = $image->hashName();
+        }
+        
 
         $invoice = EventMember::generateInvoiceNumber();
         $kode_paid = null;
@@ -76,13 +103,13 @@ class EventMemberController extends Controller
 
         $eventMember = EventMember::create(
             [
-                'payment_receipt'       => $image->hashName(),
+                'payment_receipt'       => $name_image,
                 'event_id'           => $request->event_id,
                 'invoice'           => $invoice,
                 'first_name'           => $request->first_name,
                 'last_name'           => $request->last_name,
-                'community'           => $request->community,
-                'name_bib'          => $request->name_bib,
+                // 'community'           => $request->community,
+                'name_bib'          => $kode_paid,
                 'email'           => $request->email,
                 'no_whatsapp'           => $request->no_whatsapp,
                 'event_jersey_id'           => $request->event_jersey_id,
@@ -100,6 +127,16 @@ class EventMemberController extends Controller
 
         if ($eventMember) {
             //return success with Api Resource
+            $data = [
+                'eventMember' => $eventMember
+            ];
+            if ($eventMember->status == 'PAID') {
+                Mail::to($eventMember->email)->send(new PaymentConfirmation($data));
+            } elseif ($eventMember->status == 'PENDING') {
+                Mail::to($eventMember->email)->send(new Invoice($data));
+            } else{
+
+            }
             return new EventMemberResource(true, 'Data EventMember Member Berhasil Disimpan!', $eventMember);
         }
 
@@ -140,9 +177,9 @@ class EventMemberController extends Controller
             'event_id'           => 'required',
             'first_name'           => 'required',
             'last_name'           => 'required',
-            'community'           => 'required',
-            'name_bib'          => 'required',
-            // 'email' => 'required|email|unique:event_members,email,' . $eventMember->id,
+            // 'community'           => 'required',
+            // 'name_bib'          => 'required',
+            'email' => 'required',
             'no_whatsapp'           => 'required',
             'event_jersey_id'           => 'required',
             'no_whatsapp'           => 'required',
@@ -156,8 +193,8 @@ class EventMemberController extends Controller
             return response()->json($validator->errors(), 422);
         }
 
-        $kode_paid = null;
-        if ($request->status == 'PAID' && $eventMember->kode_paid != null) {
+        $kode_paid = $eventMember->kode_paid;
+        if ($request->status == 'PAID' && $eventMember->kode_paid == null) {
             $kode_paid = EventMember::generatePaidNumber();
         }
 
@@ -171,13 +208,13 @@ class EventMemberController extends Controller
             $image = $request->file('payment_receipt');
             $image->storeAs('public/payment_receipt', $image->hashName());
 
-            $eventMember->update([                
+            $eventMember->update([
                 'payment_receipt'       => $image->hashName(),
                 'event_id'           => $request->event_id,
                 'first_name'           => $request->first_name,
                 'last_name'           => $request->last_name,
                 'community'           => $request->community,
-                'name_bib'          => $request->name_bib,
+                'name_bib'          => $kode_paid,
                 'email'           => $request->email,
                 'no_whatsapp'           => $request->no_whatsapp,
                 'event_jersey_id'           => $request->event_jersey_id,
@@ -193,12 +230,12 @@ class EventMemberController extends Controller
         }
 
         $eventMember->update([
-            
+
             'event_id'           => $request->event_id,
             'first_name'           => $request->first_name,
             'last_name'           => $request->last_name,
             'community'           => $request->community,
-            'name_bib'          => $request->name_bib,
+            'name_bib'          => $kode_paid,
             'email'           => $request->email,
             'no_whatsapp'           => $request->no_whatsapp,
             'event_jersey_id'           => $request->event_jersey_id,
@@ -208,12 +245,23 @@ class EventMemberController extends Controller
             'no_hp_emergency'           => $request->no_hp_emergency,
             'payment'           => $request->payment,
             'status'           => $request->status,
-                'kode_paid'     => $kode_paid,
-                'no_member'     => $kode_paid,
+            'kode_paid'     => $kode_paid,
+            'no_member'     => $kode_paid,
         ]);
 
         if ($eventMember) {
             //return success with Api Resource
+            $data = [
+                'eventMember' => $eventMember
+            ];
+            if ($eventMember->status == 'PAID') {
+                Mail::to($eventMember->email)->send(new PaymentConfirmation($data));
+            } elseif ($eventMember->status == 'PENDING') {
+                Mail::to($eventMember->email)->send(new Invoice($data));
+            } else{
+
+            }
+
             return new EventMemberResource(true, 'Data Event Member Berhasil Diupdate!', $eventMember);
         }
 
@@ -239,5 +287,27 @@ class EventMemberController extends Controller
 
         //return failed with Api Resource
         return new EventMemberResource(false, 'Data Event Member Gagal Dihapus!', null);
+    }
+
+    /**
+     * Re Reg Member.
+     *
+     * @param  int  $id
+     * @return \Illuminate\Http\Response
+     */
+    public function reReg($id)
+    {
+        $data = EventMember::find($id);
+        $data->update([
+            'status'           => 'PAID-REG',
+        ]);
+
+        if ($data) {
+            //return success with Api Resource
+            return new EventMemberResource(true, 'Data Event Member Berhasil Registrasi Ulang!', null);
+        }
+
+        //return failed with Api Resource
+        return new EventMemberResource(false, 'Data Event Member Gagal Registrasi Ulang!', null);
     }
 }

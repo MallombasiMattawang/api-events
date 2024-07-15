@@ -93,7 +93,8 @@ class EventJerseyController extends Controller
     {
         $validator = Validator::make($request->all(), [
              'size'     => 'required',
-            'amount' => 'required|integer'
+             'amount' => 'required|integer',
+             'stock' => 'required|integer'
         ]);
 
         if ($validator->fails()) {
